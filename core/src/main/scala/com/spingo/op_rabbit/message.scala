@@ -16,6 +16,7 @@ trait MessageForPublicationLike extends (Channel => Unit) {
 
 object MessageForPublicationLike {
   type Factory[T, M <: MessageForPublicationLike] = (T => M)
+  val defaultProperties = List(props.DeliveryMode.persistent)
 }
 
 /**
@@ -82,7 +83,7 @@ object UnconfirmedMessage {
   }
 
   def factory[T](publisher: MessagePublisher, properties: Seq[props.MessageProperty] = Seq.empty, dropIfNoChannel: Boolean = false)(implicit marshaller: RabbitMarshaller[T]): MessageForPublicationLike.Factory[T, UnconfirmedMessage] = {
-    val builder = props.applyTo(properties)
+    val builder = props.applyTo(MessageForPublicationLike.defaultProperties ++ properties)
     marshaller.properties(builder)
     val rabbitProperties = builder.build
 
@@ -106,7 +107,7 @@ object ConfirmedMessage {
   }
 
   def factory[T](publisher: MessagePublisher, properties: Seq[props.MessageProperty] = Seq.empty, dropIfNoChannel: Boolean = false)(implicit marshaller: RabbitMarshaller[T]): MessageForPublicationLike.Factory[T, ConfirmedMessage] = {
-    val builder = props.applyTo(properties)
+    val builder = props.applyTo(MessageForPublicationLike.defaultProperties ++ properties)
     marshaller.properties(builder)
     val rabbitProperties = builder.build
 
@@ -146,7 +147,7 @@ class StatusCheckMessage(timeout: Duration = 5 seconds)(implicit actorSystem: Ac
 }
 
 object TopicMessage {
-  def apply[T](message: T, routingKey: String, exchange: String = RabbitControl.topicExchangeName, properties: Seq[props.MessageProperty] = Seq.empty)(implicit marshaller: RabbitMarshaller[T]): MessageForPublicationLike =
+  def apply[T](message: T, routingKey: String, exchange: String = RabbitControl.topicExchangeName, properties: Seq[props.MessageProperty] = Seq.empty)(implicit marshaller: RabbitMarshaller[T]): ConfirmedMessage =
     ConfirmedMessage(TopicPublisher(routingKey, exchange), message)
 }
 
@@ -154,6 +155,6 @@ object QueueMessage {
   def apply[T](
     message: T,
     queue: String,
-    properties: Seq[props.MessageProperty] = Seq.empty)(implicit marshaller: RabbitMarshaller[T]): MessageForPublicationLike =
+    properties: Seq[props.MessageProperty] = Seq.empty)(implicit marshaller: RabbitMarshaller[T]): ConfirmedMessage =
     ConfirmedMessage(QueuePublisher(queue), message)
 }
