@@ -2,15 +2,16 @@ package com.spingo.op_rabbit
 
 import akka.actor._
 import akka.pattern.pipe
-import akka.stream.{OperationAttributes, SourceShape}
 import akka.stream.actor.{ActorPublisher, ActorPublisherMessage}
 import akka.stream.impl.SourceModule
+import akka.stream.{OperationAttributes, SourceShape}
+import com.spingo.op_rabbit.subscription.Subscription
 import com.thenewmotion.akka.rabbitmq.Channel
 import org.reactivestreams.{Publisher, Subscriber}
 import scala.annotation.tailrec
 import scala.collection.mutable.Queue
-import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future, Promise}
 
 object RabbitSource {
   type OUTPUT[T] = (Promise[Unit], T)

@@ -1,7 +1,7 @@
-package com.spingo.op_rabbit
+package com.spingo.op_rabbit.subscription
 
 import shapeless._
-import com.spingo.op_rabbit.dsl.Handler
+
 abstract class ApplyConverter[L <: HList] {
   type In
   def apply(f: In): L ⇒ Handler

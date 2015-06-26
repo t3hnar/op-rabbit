@@ -1,19 +1,30 @@
-package com.spingo.op_rabbit
+package com.spingo.op_rabbit.subscription
 
 import akka.actor._
+import com.spingo.op_rabbit.Consumer
+import com.spingo.op_rabbit.RabbitControl.{Pause, Run}
 import com.spingo.op_rabbit.RabbitExceptionMatchers._
-import com.thenewmotion.akka.rabbitmq.{Channel, ChannelCreated, CreateChannel, ChannelActor}
+import com.thenewmotion.akka.rabbitmq.{Channel, ChannelActor, ChannelCreated, CreateChannel}
 import scala.concurrent.{ExecutionContext, Promise}
 import scala.concurrent.duration._
 
-private [op_rabbit] class SubscriptionActor(subscription: Subscription[Consumer], connection: ActorRef) extends LoggingFSM[SubscriptionActor.State, SubscriptionActor.ConnectionInfo] {
+private [op_rabbit] class SubscriptionActor(subscription: Subscription, connection: ActorRef) extends LoggingFSM[SubscriptionActor.State, SubscriptionActor.ConnectionInfo] {
   import SubscriptionActor._
 
-  import RabbitControl.{Pause, Run}
 
   startWith(Paused, ConnectionInfo(None, None))
 
-  val consumer = context.actorOf(subscription.consumer.props(subscription.binding.queueName), "consumer")
+  val props = Props {
+    new com.spingo.op_rabbit.impl.AsyncAckingRabbitConsumer(
+      name             = subscription.binding.queueName,
+      queueName        = subscription.binding.queueName,
+      recoveryStrategy = subscription._recoveryStrategy,
+      rabbitErrorLogging = subscription._errorReporting,
+      onChannel        = { (channel) => channel.basicQos(subscription.channelConfiguration.qos) },
+      handle           = subscription.handler)(subscription._executionContext)
+  }
+
+  val consumer = context.actorOf(props, "consumer")
   context.watch(consumer)
   subscription._consumerRef.success(consumer)
 
@@ -112,7 +123,7 @@ private [op_rabbit] object SubscriptionActor {
   case object Stopped extends State
 
   sealed trait Commands
-  def props(subscription: Subscription[Consumer], connection: ActorRef): Props =
+  def props(subscription: Subscription, connection: ActorRef): Props =
     Props(classOf[SubscriptionActor], subscription, connection)
 
   case object Shutdown extends Commands

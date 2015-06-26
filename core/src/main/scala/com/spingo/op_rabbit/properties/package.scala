@@ -7,12 +7,12 @@ import scala.collection.JavaConversions._
 import java.nio.charset.Charset
 import java.util.Date
 
-package object props {
-  type HeaderMap = java.util.Map[String, Object]
+package object properties {
+  type HeaderMap = java.util.HashMap[String, Object]
   trait MessageProperty extends ((Builder, HeaderMap) => Unit)
 
   trait PropertyExtractor[T] {
-    def name: String = getClass.getSimpleName.replace("$", "")
+    def extractorName: String = getClass.getSimpleName.replace("$", "")
     def unapply(properties: BasicProperties): Option[T]
   }
 
@@ -155,6 +155,17 @@ package object props {
     }
   }
 
+  case class UnboundHeader(name: String) extends (HeaderValue => Header) with PropertyExtractor[HeaderValue] {
+    override val extractorName = s"Header(${name})"
+    def unapply(properties: BasicProperties) =
+      for {
+        h <- Option(properties.getHeaders)
+        v <- Option(h.get(name))
+      } yield HeaderValue.from(v)
+
+    def apply(value: HeaderValue) = Header(extractorName, value)
+  }
+
   class Header protected (name: String, value: HeaderValue) extends MessageProperty {
     def apply(builder: Builder, headers: HeaderMap): Unit = {
       headers.put(name, value.serializable)
@@ -167,14 +178,7 @@ package object props {
       else
         new Header(name, value)
     }
-    def apply(headerName: String) = new PropertyExtractor[HeaderValue] {
-      override val name = s"Header(${headerName})"
-      def unapply(properties: BasicProperties) =
-        for {
-          h <- Option(properties.getHeaders)
-          v <- Option(h.get(headerName))
-        } yield HeaderValue.from(v)
-    }
+    def apply(headerName: String) = UnboundHeader(headerName)
   }
   case class DeliveryMode(mode: Int) extends MessageProperty {
     def apply(builder: Builder, headers: HeaderMap): Unit = {
@@ -286,7 +290,7 @@ package object props {
       Option(properties.getClusterId)
   }
 
-  def applyTo(properties: TraversableOnce[MessageProperty], builder: Builder = new Builder(), headers: java.util.Map[String, Object] = new java.util.HashMap[String, Object]): Builder = {
+  def builderWithProperties(properties: TraversableOnce[MessageProperty], builder: Builder = new Builder(), headers: HeaderMap = new java.util.HashMap[String, Object]): Builder = {
     properties foreach { p => p(builder, headers) }
     builder.headers(headers)
     builder
