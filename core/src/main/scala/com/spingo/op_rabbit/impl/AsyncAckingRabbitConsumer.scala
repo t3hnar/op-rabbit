@@ -23,7 +23,6 @@ protected [op_rabbit] class AsyncAckingRabbitConsumer[T](
   queueName: String,
   recoveryStrategy: com.spingo.op_rabbit.subscription.RecoveryStrategy,
   rabbitErrorLogging: RabbitErrorLogging,
-  onChannel: (Channel) => Unit,
   handle: Handler)(implicit executionContext: ExecutionContext) extends Actor with ActorLogging {
 
   import Consumer._
@@ -114,7 +113,6 @@ protected [op_rabbit] class AsyncAckingRabbitConsumer[T](
   }
 
   def setupSubscription(channel: Channel): String = {
-    onChannel(channel)
     channel.basicConsume(queueName, false,
       new DefaultConsumer(channel) {
         override def handleDelivery(consumerTag: String, envelope: Envelope, properties: BasicProperties, body: Array[Byte]): Unit = {

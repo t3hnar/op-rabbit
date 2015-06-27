@@ -122,6 +122,7 @@ class RabbitControl(connectionParams: ConnectionParams) extends Actor with Actor
     case q: Subscription =>
       val subscriptionActorRef = context.actorOf(subscription.SubscriptionActor.props(q, connectionActor), name = s"subscription-${java.net.URLEncoder.encode(q.binding.queueName)}")
       context watch subscriptionActorRef
+      // TODO - we need this actor to know the currect subscription state
       subscriptionActorRef ! Run
       subscriptions = subscriptionActorRef :: subscriptions
 

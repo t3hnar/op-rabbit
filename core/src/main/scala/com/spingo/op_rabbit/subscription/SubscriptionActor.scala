@@ -3,7 +3,9 @@ package com.spingo.op_rabbit.subscription
 import akka.actor._
 import com.spingo.op_rabbit.Consumer
 import com.spingo.op_rabbit.RabbitControl.{Pause, Run}
+import com.spingo.op_rabbit.RabbitExceptionMatchers
 import com.spingo.op_rabbit.RabbitExceptionMatchers._
+import com.thenewmotion.akka.rabbitmq.ChannelMessage
 import com.thenewmotion.akka.rabbitmq.{Channel, ChannelActor, ChannelCreated, CreateChannel}
 import scala.concurrent.{ExecutionContext, Promise}
 import scala.concurrent.duration._
@@ -11,8 +13,7 @@ import scala.concurrent.duration._
 private [op_rabbit] class SubscriptionActor(subscription: Subscription, connection: ActorRef) extends LoggingFSM[SubscriptionActor.State, SubscriptionActor.ConnectionInfo] {
   import SubscriptionActor._
 
-
-  startWith(Paused, ConnectionInfo(None, None))
+  startWith(Paused, ConnectionInfo(None, subscription.channelConfiguration.qos))
 
   val props = Props {
     new com.spingo.op_rabbit.impl.AsyncAckingRabbitConsumer(
@@ -20,13 +21,12 @@ private [op_rabbit] class SubscriptionActor(subscription: Subscription, connecti
       queueName        = subscription.binding.queueName,
       recoveryStrategy = subscription._recoveryStrategy,
       rabbitErrorLogging = subscription._errorReporting,
-      onChannel        = { (channel) => channel.basicQos(subscription.channelConfiguration.qos) },
       handle           = subscription.handler)(subscription._executionContext)
   }
 
   val consumer = context.actorOf(props, "consumer")
   context.watch(consumer)
-  subscription._consumerRef.success(consumer)
+  subscription._subscriptionRef.success(self)
 
   private case class ChannelConnected(channel: Channel, channelActor: ActorRef)
 
@@ -34,8 +34,8 @@ private [op_rabbit] class SubscriptionActor(subscription: Subscription, connecti
   val channelActorP = Promise[ActorRef]
 
   when(Running) {
-    case Event(ChannelConnected(channel, _), info) =>
-      subscribe(channel) using info.copy(channel = Some(channel))
+    case Event(ChannelConnected(_, _), info) =>
+      subscribe(info) using info
     case Event(Pause, _) =>
       consumer.tell(Consumer.Unsubscribe, sender)
       goto(Paused)
@@ -44,29 +44,33 @@ private [op_rabbit] class SubscriptionActor(subscription: Subscription, connecti
   }
 
   when(Paused) {
-    case Event(ChannelConnected(channel, _), info) =>
-      stay using info.copy(channel = Some(channel))
+    case Event(ChannelConnected(_, _), info) =>
+      stay
     case Event(Run, connection) =>
-      connection.channel map (subscribe) getOrElse (goto(Running)) replying true
+      subscribe(connection) replying true
     case Event(Pause, _) =>
       stay replying true
   }
 
   whenUnhandled {
-    case Event(ChannelCreated(channelActor_), _) =>
+    case Event(ChannelCreated(channelActor_), info) =>
       channelActorP.success(channelActor_)
-      stay
+      stay using info.copy(channelActor = Some(channelActor_))
 
     case Event(Terminated(actor), _) if actor == consumer =>
       // our consumer stopped; time to shut ourself down
       consumerStoppedP.success(())
       stay
 
+    case Event(Subscription.SetQos(qos), connectionInfo) =>
+      connectionInfo.channelActor foreach { _ ! ChannelMessage { _.basicQos(qos) } }
+      stay using connectionInfo.copy(qos = qos)
+
     case Event(e, s) =>
       log.error("received unhandled request {} in state {}/{}", e, stateName, s)
       stay
-
   }
+
   onTermination {
     case StopEvent(_, _, connectionInfo) =>
       subscription._closedP.trySuccess(())
@@ -104,16 +108,20 @@ private [op_rabbit] class SubscriptionActor(subscription: Subscription, connecti
     } system stop self
   }
 
-  def subscribe(channel: Channel) = {
-    subscription.binding.bind(channel)
-    subscription._initializedP.trySuccess(Unit)
-    consumer ! Consumer.Subscribe(channel)
+  def subscribe(connectionInfo: ConnectionInfo) = {
+    connectionInfo.channelActor foreach { channelActor =>
+      channelActor ! ChannelMessage { channel =>
+        channel.basicQos(connectionInfo.qos)
+        subscription.binding.bind(channel)
+        subscription._initializedP.trySuccess(Unit)
+        consumer ! Consumer.Subscribe(channel)
+      }
+    }
     goto(Running)
   }
 
   def unsubscribe = {
   }
-
 }
 
 private [op_rabbit] object SubscriptionActor {
@@ -127,5 +135,5 @@ private [op_rabbit] object SubscriptionActor {
     Props(classOf[SubscriptionActor], subscription, connection)
 
   case object Shutdown extends Commands
-  case class ConnectionInfo(channelActor: Option[ActorRef], channel: Option[Channel])
+  case class ConnectionInfo(channelActor: Option[ActorRef], qos: Int)
 }
