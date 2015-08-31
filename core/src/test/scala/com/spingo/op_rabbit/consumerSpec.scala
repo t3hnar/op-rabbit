@@ -201,7 +201,6 @@ class ConsumerSpec extends FunSpec with ScopedFixtures with Matchers with Rabbit
           channel(qos = 8) {
             consume(queue(queueName, durable = true, exclusive = false, autoDelete = false)) {
               body(as[Int]) { i =>
-                println(s"${i} received")
                 receivedCounts(i) = receivedCounts(i) + 1
                 received(i).success(())
                 ackThem.future.map { _ => Thread.sleep(50 * i) }
